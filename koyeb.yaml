@@ -1,5 +1,5 @@
 services:
-  - name: rating-telegram-bot
+  - name: padel-beer-bot
     type: web
     build:
       type: docker
@@ -10,7 +10,7 @@ services:
       - key: BOT_TOKEN
         value: "8494531608:AAGKfT5IIh8WehgsW-H04nG6pR1mQB_KD4o"
       - key: WEBHOOK_URL
-        value: "https://rating-telegram-bot.koyeb.app"
+        value: "https://padel-beer-bot.koyeb.app"
       - key: DATABASE_URL
         value: "sqlite+aiosqlite:///./data/rating_bot.db"
       - key: APP_HOST

@@ -33,13 +33,13 @@ jobs:
       uses: koyeb/action-git-deploy@v1
       with:
         api-token: ${{ secrets.KOYEB_API_TOKEN }}
-        service-name: rating-telegram-bot
+        service-name: padel-beer-bot
         service-type: web
         build-type: docker
         ports: "8000:http"
         env: |
           BOT_TOKEN=${{ secrets.BOT_TOKEN }}
-          WEBHOOK_URL=https://rating-telegram-bot.koyeb.app
+          WEBHOOK_URL=https://padel-beer-bot.koyeb.app
           DATABASE_URL=sqlite+aiosqlite:///./data/rating_bot.db
           APP_HOST=0.0.0.0
           APP_PORT=8000
