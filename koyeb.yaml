@@ -8,7 +8,7 @@ services:
         protocol: http
     env:
       - key: BOT_TOKEN
-        value: "8494531608:AAGKfT5IIh8WehgsW-H04nG6pR1mQB_KD4o"
+        value: "PLACEHOLDER_BOT_TOKEN"  # Установите через Web Interface
       - key: WEBHOOK_URL
         value: "https://padel-beer-bot.koyeb.app"
       - key: DATABASE_URL
