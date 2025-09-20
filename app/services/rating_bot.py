@@ -16,7 +16,10 @@ from datetime import datetime
 
 def get_db_path():
     """Получить путь к базе данных"""
-    return os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./local_rating_bot.db").replace("sqlite+aiosqlite:///", "")
+    # Для локальной разработки используем local_rating_bot.db
+    default_url = "sqlite+aiosqlite:///./local_rating_bot.db"
+    db_url = os.getenv("DATABASE_URL", default_url)
+    return db_url.replace("sqlite+aiosqlite:///", "")
 
 def get_db_connection():
     """Получить подключение к базе данных"""

@@ -100,7 +100,12 @@ def add_test_data(conn):
 
 def main():
     """Главная функция"""
-    db_path = sys.argv[1] if len(sys.argv) > 1 else "local_rating_bot.db"
+    # Используем тот же путь, что и в rating_bot.py
+    if len(sys.argv) > 1:
+        db_path = sys.argv[1]
+    else:
+        from app.services.rating_bot import get_db_path
+        db_path = get_db_path()
     
     print(f"🗄️  Просмотр базы данных: {db_path}")
     print("=" * 50)
