@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,7 +16,7 @@ class UserRating(Base):
     telegram_username = Column(String(255), nullable=True, index=True, comment="Telegram @username")
     first_name = Column(String(255), nullable=True, comment="Telegram first name")
     PT_userId = Column(String(255), nullable=True, comment="PlayTomic username")
-    rating = Column(Integer, default=0)
+    rating = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

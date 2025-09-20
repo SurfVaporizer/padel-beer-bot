@@ -49,6 +49,22 @@ def ensure_user_exists(telegram_id: int, username: str = None, first_name: str =
     finally:
         conn.close()
 
+def parse_rating(rating_str: str) -> float:
+    """Парсинг рейтинга с поддержкой точки и запятой как десятичного разделителя"""
+    try:
+        # Заменяем запятую на точку для стандартного парсинга
+        normalized_str = rating_str.replace(',', '.')
+        rating = float(normalized_str)
+        
+        # Ограничиваем точность до 2 знаков после запятой
+        return round(rating, 2)
+    except ValueError:
+        return None
+
+def is_valid_rating(rating_str: str) -> bool:
+    """Проверка, является ли строка валидным рейтингом"""
+    return parse_rating(rating_str) is not None
+
 def get_user_id_by_username(username: str) -> int:
     """Получить telegram_id по username"""
     # Убираем @ если есть
@@ -65,7 +81,7 @@ def get_user_id_by_username(username: str) -> int:
     finally:
         conn.close()
 
-def set_rating(user_id: int, rating: int):
+def set_rating(user_id: int, rating: float):
     """Установить рейтинг пользователя в базе данных"""
     ensure_user_exists(user_id)
     conn = get_db_connection()
@@ -78,13 +94,13 @@ def set_rating(user_id: int, rating: int):
     finally:
         conn.close()
 
-def get_rating(user_id: int) -> int:
+def get_rating(user_id: int) -> float:
     """Получить рейтинг пользователя из базы данных"""
     conn = get_db_connection()
     try:
         cursor = conn.execute("SELECT rating FROM user_ratings WHERE telegram_id = ?", (user_id,))
         result = cursor.fetchone()
-        return result[0] if result and result[0] is not None else 0
+        return result[0] if result and result[0] is not None else 0.0
     finally:
         conn.close()
 
@@ -221,18 +237,18 @@ class RatingBot:
         target_display_name = None
 
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
-        if update.message and update.message.reply_to_message and len(args) == 1 and args[0].isdigit():
+        if update.message and update.message.reply_to_message and len(args) == 1 and is_valid_rating(args[0]):
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
             target_display_name = update.message.reply_to_message.from_user.first_name
-            rating_val = int(args[0])
+            rating_val = parse_rating(args[0])
             # Сохраняем информацию о целевом пользователе
             ensure_user_exists(target_user_id, update.message.reply_to_message.from_user.username, 
                              update.message.reply_to_message.from_user.first_name)
 
         # Вариант 2: /setrating @username <rating> (только для админов)
-        elif len(args) == 2 and args[0].startswith('@') and args[1].isdigit():
+        elif len(args) == 2 and args[0].startswith('@') and is_valid_rating(args[1]):
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = get_user_id_by_username(args[0])
@@ -244,38 +260,40 @@ class RatingBot:
                     f"Пример: /setrating 123456789 {args[1]}"
                 )
             target_display_name = args[0]
-            rating_val = int(args[1])
+            rating_val = parse_rating(args[1])
 
         # Вариант 3: /setrating <user_id> <rating> (только для админов)
-        elif len(args) == 2 and args[0].isdigit() and args[1].isdigit():
+        elif len(args) == 2 and args[0].isdigit() and is_valid_rating(args[1]):
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
             target_display_name = f"user_id={target_user_id}"
-            rating_val = int(args[1])
+            rating_val = parse_rating(args[1])
             
             # Создаем пользователя если его нет (только для админов)
             ensure_user_exists(target_user_id, None, None)
 
         # Вариант 4: /setrating <rating> — себе (доступно всем)
-        elif len(args) == 1 and args[0].isdigit():
+        elif len(args) == 1 and is_valid_rating(args[0]):
             target_user_id = current_user_id
             target_display_name = "вам"
-            rating_val = int(args[0])
+            rating_val = parse_rating(args[0])
 
         if target_user_id is None or rating_val is None:
             if is_user_admin:
                 return await update.message.reply_text(
                     "Использование:\n"
-                    "• В ответ на сообщение: /setrating 12\n"
-                    "• По @username: /setrating @john_doe 12\n"
-                    "• По user_id: /setrating 123456789 12\n"
-                    "• Себе: /setrating 12"
+                    "• В ответ на сообщение: /setrating 2.5\n"
+                    "• По @username: /setrating @john_doe 2,3\n"
+                    "• По user_id: /setrating 123456789 1.75\n"
+                    "• Себе: /setrating 2.0\n\n"
+                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7"
                 )
             else:
                 return await update.message.reply_text(
                     "Использование:\n"
-                    "• Себе: /setrating 12\n\n"
+                    "• Себе: /setrating 2.5\n\n"
+                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7\n"
                     "💡 Только администраторы могут устанавливать рейтинг другим пользователям."
                 )
 
@@ -433,7 +451,7 @@ class RatingBot:
 
         try:
             telegram_id = int(args[0])
-            rating = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
+            rating = parse_rating(args[1]) if len(args) > 1 and is_valid_rating(args[1]) else 0.0
             playtomic_id = args[2] if len(args) > 2 else None
             
             # Проверяем, существует ли пользователь
