@@ -1,0 +1,24 @@
+services:
+  - name: rating-telegram-bot
+    type: web
+    build:
+      type: docker
+    ports:
+      - port: 8000
+        protocol: http
+    env:
+      - key: BOT_TOKEN
+        value: "8494531608:AAGKfT5IIh8WehgsW-H04nG6pR1mQB_KD4o"
+      - key: WEBHOOK_URL
+        value: "https://rating-telegram-bot.koyeb.app"
+      - key: DATABASE_URL
+        value: "sqlite+aiosqlite:///./data/rating_bot.db"
+      - key: APP_HOST
+        value: "0.0.0.0"
+      - key: APP_PORT
+        value: "8000"
+      - key: DEBUG
+        value: "false"
+    regions:
+      - fra
+    instance_type: nano

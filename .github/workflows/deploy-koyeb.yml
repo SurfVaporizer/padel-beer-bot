@@ -1,0 +1,48 @@
+name: Deploy to Koyeb
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run tests
+      run: |
+        python -m pytest tests/ -v
+    
+    - name: Deploy to Koyeb
+      if: github.ref == 'refs/heads/main'
+      uses: koyeb/action-git-deploy@v1
+      with:
+        api-token: ${{ secrets.KOYEB_API_TOKEN }}
+        service-name: rating-telegram-bot
+        service-type: web
+        build-type: docker
+        ports: "8000:http"
+        env: |
+          BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+          WEBHOOK_URL=https://rating-telegram-bot.koyeb.app
+          DATABASE_URL=sqlite+aiosqlite:///./data/rating_bot.db
+          APP_HOST=0.0.0.0
+          APP_PORT=8000
+          DEBUG=false
+        regions: fra
+        instance-type: nano
