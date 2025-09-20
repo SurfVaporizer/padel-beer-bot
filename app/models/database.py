@@ -13,6 +13,8 @@ class UserRating(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
+    telegram_username = Column(String(255), nullable=True, index=True, comment="Telegram @username")
+    first_name = Column(String(255), nullable=True, comment="Telegram first name")
     PT_userId = Column(String(255), nullable=True, comment="PlayTomic username")
     rating = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)

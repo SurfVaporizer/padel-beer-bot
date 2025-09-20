@@ -28,15 +28,40 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def ensure_user_exists(telegram_id: int):
+def ensure_user_exists(telegram_id: int, username: str = None, first_name: str = None):
     """Убедиться, что пользователь существует в базе"""
     conn = get_db_connection()
     try:
+        # Сначала пытаемся создать запись
         conn.execute(
-            "INSERT OR IGNORE INTO user_ratings (telegram_id, rating, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (telegram_id, 0, datetime.now(), datetime.now())
+            "INSERT OR IGNORE INTO user_ratings (telegram_id, telegram_username, first_name, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (telegram_id, username, first_name, 0, datetime.now(), datetime.now())
         )
+        
+        # Если запись уже существует, обновляем username и first_name (они могут измениться)
+        if username is not None or first_name is not None:
+            conn.execute(
+                "UPDATE user_ratings SET telegram_username = ?, first_name = ?, updated_at = ? WHERE telegram_id = ?",
+                (username, first_name, datetime.now(), telegram_id)
+            )
+        
         conn.commit()
+    finally:
+        conn.close()
+
+def get_user_id_by_username(username: str) -> int:
+    """Получить telegram_id по username"""
+    # Убираем @ если есть
+    clean_username = username.lstrip('@').lower()
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT telegram_id FROM user_ratings WHERE LOWER(telegram_username) = ?", 
+            (clean_username,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
     finally:
         conn.close()
 
@@ -128,35 +153,43 @@ class RatingBot:
 
 /start - Начать работу с ботом
 /getrating - Узнать рейтинг
+/getuserrating - Узнать рейтинг пользователя
 /setrating - Установить рейтинг
 /setptid - Установить PlayTomic ID
 /getptid - Узнать PlayTomic ID
 /profile - Полный профиль пользователя
 /help - Показать эту справку
 
-📝 Как использовать команды:
-• /setrating: В ответ на сообщение, по user_id или себе
-• /setptid: В ответ на сообщение, по user_id или себе
-• /getrating, /getptid, /profile: В ответ на сообщение, по user_id или свой
+📝 Форматы команд для админов:
+• /setrating @username 25 - по @username
+• /setrating 123456789 25 - по telegram_id
+• /setrating 25 (в ответ) - в ответ на сообщение
+• /setrating 25 - себе
+
+• /getrating @username - рейтинг по @username
+• /getrating 123456789 - рейтинг по telegram_id
+• /getrating (в ответ) - в ответ на сообщение
             """
         else:
             help_text = """
 🎾 Команды бота:
 
 /start - Начать работу с ботом
-/getrating - Узнать рейтинг
+/getrating - Узнать свой рейтинг
+/getuserrating - Узнать рейтинг пользователя
 /setrating - Установить свой рейтинг
 /setptid - Установить свой PlayTomic ID
 /getptid - Узнать PlayTomic ID
 /profile - Свой профиль
 /help - Показать эту справку
 
-📝 Примеры использования:
-• /setrating 12 - установить себе рейтинг 12
-• /setptid myusername - установить PlayTomic ID
+📝 Что вы можете:
+• /setrating 12 - установить себе рейтинг
+• /getrating @username - узнать рейтинг пользователя
 • /profile - посмотреть свой профиль
 
-💡 Администраторы могут управлять данными других пользователей.
+💡 Администраторы могут устанавливать рейтинг другим:
+• /setrating @username 25
             """
         
         await update.message.reply_text(help_text)
@@ -174,29 +207,51 @@ class RatingBot:
         """Команда /setrating - установить рейтинг"""
         args = context.args
         current_user_id = update.effective_user.id
+        current_username = update.effective_user.username
+        current_first_name = update.effective_user.first_name
         is_user_admin = await is_admin(update, context)
+        
+        # Сохраняем/обновляем информацию о текущем пользователе
+        ensure_user_exists(current_user_id, current_username, current_first_name)
         
         # Определяем цель
         target_user_id = None
         rating_val = None
+        target_display_name = None
 
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
         if update.message and update.message.reply_to_message and len(args) == 1 and args[0].isdigit():
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
+            target_display_name = update.message.reply_to_message.from_user.first_name
             rating_val = int(args[0])
+            # Сохраняем информацию о целевом пользователе
+            ensure_user_exists(target_user_id, update.message.reply_to_message.from_user.username, 
+                             update.message.reply_to_message.from_user.first_name)
 
-        # Вариант 2: /setrating <user_id> <rating> (только для админов)
+        # Вариант 2: /setrating @username <rating> (только для админов)
+        elif len(args) == 2 and args[0].startswith('@') and args[1].isdigit():
+            if not is_user_admin:
+                return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
+            target_user_id = get_user_id_by_username(args[0])
+            if target_user_id is None:
+                return await update.message.reply_text(f"❌ Пользователь {args[0]} не найден в базе данных. Пользователь должен сначала использовать бота.")
+            target_display_name = args[0]
+            rating_val = int(args[1])
+
+        # Вариант 3: /setrating <user_id> <rating> (только для админов)
         elif len(args) == 2 and args[0].isdigit() and args[1].isdigit():
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
+            target_display_name = f"user_id={target_user_id}"
             rating_val = int(args[1])
 
-        # Вариант 3: /setrating <rating> — себе (доступно всем)
+        # Вариант 4: /setrating <rating> — себе (доступно всем)
         elif len(args) == 1 and args[0].isdigit():
             target_user_id = current_user_id
+            target_display_name = "вам"
             rating_val = int(args[0])
 
         if target_user_id is None or rating_val is None:
@@ -204,7 +259,8 @@ class RatingBot:
                 return await update.message.reply_text(
                     "Использование:\n"
                     "• В ответ на сообщение: /setrating 12\n"
-                    "• Явно по user_id: /setrating 123456789 12\n"
+                    "• По @username: /setrating @john_doe 12\n"
+                    "• По user_id: /setrating 123456789 12\n"
                     "• Себе: /setrating 12"
                 )
             else:
@@ -215,18 +271,24 @@ class RatingBot:
                 )
 
         set_rating(target_user_id, rating_val)
-        who = "вам" if target_user_id == current_user_id else f"user_id={target_user_id}"
-        await update.message.reply_text(f"✅ Рейтинг {who} установлен: {rating_val}")
+        await update.message.reply_text(f"✅ Рейтинг {target_display_name} установлен: {rating_val}")
 
     @staticmethod
     async def get_user_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Получить рейтинг конкретного пользователя по ID или в ответ на сообщение"""
+        """Получить рейтинг конкретного пользователя по ID, @username или в ответ на сообщение"""
         target_user_id = None
+        target_username = None
         
         # Если это ответ на сообщение
         if update.message and update.message.reply_to_message:
             target_user_id = update.message.reply_to_message.from_user.id
             target_username = update.message.reply_to_message.from_user.first_name
+        # Если указан @username
+        elif context.args and len(context.args) == 1 and context.args[0].startswith('@'):
+            target_user_id = get_user_id_by_username(context.args[0])
+            if target_user_id is None:
+                return await update.message.reply_text(f"❌ Пользователь {context.args[0]} не найден в базе данных.")
+            target_username = context.args[0]
         # Если указан user_id в аргументах
         elif context.args and len(context.args) == 1 and context.args[0].isdigit():
             target_user_id = int(context.args[0])
