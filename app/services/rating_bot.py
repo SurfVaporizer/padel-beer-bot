@@ -9,25 +9,79 @@ from app.models.database import get_db, UserRating
 
 logger = logging.getLogger(__name__)
 
-# Простое хранилище рейтингов в памяти (можно заменить на базу данных)
-user_ratings = {}
-user_pt_ids = {}  # Хранилище PlayTomic ID
+# Функции для работы с базой данных SQLite
+import sqlite3
+import os
+from datetime import datetime
+
+def get_db_path():
+    """Получить путь к базе данных"""
+    return os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./local_rating_bot.db").replace("sqlite+aiosqlite:///", "")
+
+def get_db_connection():
+    """Получить подключение к базе данных"""
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def ensure_user_exists(telegram_id: int):
+    """Убедиться, что пользователь существует в базе"""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_ratings (telegram_id, rating, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (telegram_id, 0, datetime.now(), datetime.now())
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def set_rating(user_id: int, rating: int):
-    """Установить рейтинг пользователя"""
-    user_ratings[user_id] = rating
+    """Установить рейтинг пользователя в базе данных"""
+    ensure_user_exists(user_id)
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE user_ratings SET rating = ?, updated_at = ? WHERE telegram_id = ?",
+            (rating, datetime.now(), user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_rating(user_id: int) -> int:
-    """Получить рейтинг пользователя"""
-    return user_ratings.get(user_id, 0)
+    """Получить рейтинг пользователя из базы данных"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("SELECT rating FROM user_ratings WHERE telegram_id = ?", (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] is not None else 0
+    finally:
+        conn.close()
 
 def set_pt_userid(user_id: int, pt_userid: str):
-    """Установить PlayTomic ID пользователя"""
-    user_pt_ids[user_id] = pt_userid
+    """Установить PlayTomic ID пользователя в базе данных"""
+    ensure_user_exists(user_id)
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE user_ratings SET PT_userId = ?, updated_at = ? WHERE telegram_id = ?",
+            (pt_userid, datetime.now(), user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_pt_userid(user_id: int) -> str:
-    """Получить PlayTomic ID пользователя"""
-    return user_pt_ids.get(user_id, "")
+    """Получить PlayTomic ID пользователя из базы данных"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("SELECT PT_userId FROM user_ratings WHERE telegram_id = ?", (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] is not None else ""
+    finally:
+        conn.close()
 
 # --- helper: проверка админа ---
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:

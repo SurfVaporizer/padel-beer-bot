@@ -8,15 +8,46 @@ import os
 # Добавляем корневую директорию проекта в путь
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.rating_bot import set_pt_userid, get_pt_userid, user_pt_ids
+from app.services.rating_bot import set_pt_userid, get_pt_userid, get_db_connection
+import os
+import tempfile
 
 
 class TestPlayTomicFunctions:
     """Тесты для функций управления PlayTomic ID"""
     
     def setup_method(self):
-        """Очистка PlayTomic ID перед каждым тестом"""
-        user_pt_ids.clear()
+        """Создание временной базы данных для тестов"""
+        # Создаем временный файл для тестовой базы данных
+        self.test_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.test_db.close()
+        
+        # Устанавливаем путь к тестовой базе
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{self.test_db.name}"
+        
+        # Создаем таблицу в тестовой базе
+        conn = get_db_connection()
+        try:
+            conn.execute("""
+                CREATE TABLE user_ratings (
+                    id INTEGER PRIMARY KEY,
+                    telegram_id INTEGER UNIQUE NOT NULL,
+                    PT_userId VARCHAR(255),
+                    rating INTEGER DEFAULT 0,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def teardown_method(self):
+        """Очистка тестовой базы данных"""
+        try:
+            os.unlink(self.test_db.name)
+        except:
+            pass
     
     def test_set_pt_userid(self):
         """Тест установки PlayTomic ID"""
