@@ -36,6 +36,10 @@ async def startup_event():
     await init_db()
     logger.info("Database initialized")
     
+    # Инициализируем Telegram Application
+    await telegram_app.initialize()
+    logger.info("Telegram Application initialized")
+    
     # Устанавливаем webhook если указан URL
     if settings.WEBHOOK_URL:
         webhook_url = f"{settings.WEBHOOK_URL}{settings.WEBHOOK_PATH}"
@@ -46,7 +50,12 @@ async def startup_event():
 async def shutdown_event():
     """Очистка при остановке"""
     logger.info("Shutting down Rating Bot...")
-    await telegram_app.bot.delete_webhook()
+    try:
+        await telegram_app.bot.delete_webhook()
+        await telegram_app.shutdown()
+        logger.info("Telegram Application shutdown completed")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 @app.get("/")
 async def root():
@@ -56,18 +65,52 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
-    return {"status": "healthy"}
+    try:
+        bot_status = "running" if telegram_app.running else "not_running"
+        webhook_info = {"status": "unknown"}
+        
+        if telegram_app.running and settings.WEBHOOK_URL:
+            try:
+                webhook_info = await telegram_app.bot.get_webhook_info()
+                webhook_info = {
+                    "url": webhook_info.url,
+                    "has_custom_certificate": webhook_info.has_custom_certificate,
+                    "pending_update_count": webhook_info.pending_update_count
+                }
+            except Exception as e:
+                webhook_info = {"error": str(e)}
+        
+        return {
+            "status": "healthy",
+            "bot_status": bot_status,
+            "webhook": webhook_info,
+            "webhook_path": settings.WEBHOOK_PATH
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
 
 @app.post(settings.WEBHOOK_PATH)
 async def webhook(request: Request):
     """Webhook для получения обновлений от Telegram"""
     try:
         body = await request.json()
+        logger.info(f"Received webhook update: {body.get('update_id', 'unknown')}")
+        
+        # Проверяем, что Application инициализирован
+        if not telegram_app.running:
+            logger.error("Telegram Application is not running")
+            raise HTTPException(status_code=503, detail="Bot is not ready")
+            
         update = Update.de_json(body, telegram_app.bot)
         await telegram_app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error processing webhook: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
