@@ -81,6 +81,28 @@ def get_user_id_by_username(username: str) -> int:
     finally:
         conn.close()
 
+async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str):
+    """Получить информацию о пользователе из чата по @username"""
+    try:
+        chat = update.effective_chat
+        if not chat or chat.type == "private":
+            return None, None, None
+        
+        # Убираем @ если есть
+        clean_username = username.lstrip('@')
+        
+        # Получаем информацию о участнике чата
+        member = await context.bot.get_chat_member(chat.id, clean_username)
+        
+        if member and member.user:
+            return member.user.id, member.user.username, member.user.first_name
+        
+        return None, None, None
+        
+    except Exception as e:
+        logger.debug(f"Could not get user {username} from chat: {e}")
+        return None, None, None
+
 def set_rating(user_id: int, rating: float):
     """Установить рейтинг пользователя в базе данных"""
     ensure_user_exists(user_id)
@@ -251,14 +273,29 @@ class RatingBot:
         elif len(args) == 2 and args[0].startswith('@') and is_valid_rating(args[1]):
             if not is_user_admin:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
+            
+            # Сначала ищем в базе данных
             target_user_id = get_user_id_by_username(args[0])
+            
+            # Если не найден в БД, ищем в чате
             if target_user_id is None:
-                return await update.message.reply_text(
-                    f"❌ Пользователь {args[0]} не найден в базе данных.\n\n"
-                    f"💡 Для создания нового пользователя используйте:\n"
-                    f"/setrating <telegram_id> <rating>\n\n"
-                    f"Пример: /setrating 123456789 {args[1]}"
-                )
+                chat_user_id, chat_username, chat_first_name = await get_user_from_chat(update, context, args[0])
+                
+                if chat_user_id is not None:
+                    # Найден в чате! Создаем в БД
+                    ensure_user_exists(chat_user_id, chat_username, chat_first_name)
+                    target_user_id = chat_user_id
+                    await update.message.reply_text(f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
+                else:
+                    # Не найден ни в БД, ни в чате
+                    return await update.message.reply_text(
+                        f"❌ Пользователь {args[0]} не найден ни в базе данных, ни в чате.\n\n"
+                        f"💡 Убедитесь, что:\n"
+                        f"• Пользователь находится в этом чате\n"
+                        f"• @username написан правильно\n"
+                        f"• Или используйте: /setrating <telegram_id> <rating>"
+                    )
+            
             target_display_name = args[0]
             rating_val = parse_rating(args[1])
 
@@ -292,8 +329,7 @@ class RatingBot:
             else:
                 return await update.message.reply_text(
                     "Использование:\n"
-                    "• Себе: /setrating 2.5\n\n"
-                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7\n"
+                    "• Себе: /setrating 12\n\n"
                     "💡 Только администраторы могут устанавливать рейтинг другим пользователям."
                 )
 
@@ -313,8 +349,21 @@ class RatingBot:
         # Если указан @username
         elif context.args and len(context.args) == 1 and context.args[0].startswith('@'):
             target_user_id = get_user_id_by_username(context.args[0])
+            
+            # Если не найден в БД, ищем в чате
             if target_user_id is None:
-                return await update.message.reply_text(f"❌ Пользователь {context.args[0]} не найден в базе данных.")
+                chat_user_id, chat_username, chat_first_name = await get_user_from_chat(update, context, context.args[0])
+                
+                if chat_user_id is not None:
+                    # Найден в чате! Создаем в БД
+                    ensure_user_exists(chat_user_id, chat_username, chat_first_name)
+                    target_user_id = chat_user_id
+                    await update.message.reply_text(f"✅ Пользователь {context.args[0]} найден в чате и добавлен в базу данных!")
+                else:
+                    return await update.message.reply_text(
+                        f"❌ Пользователь {context.args[0]} не найден ни в базе данных, ни в чате."
+                    )
+            
             target_username = context.args[0]
         # Если указан user_id в аргументах
         elif context.args and len(context.args) == 1 and context.args[0].isdigit():
@@ -451,7 +500,7 @@ class RatingBot:
 
         try:
             telegram_id = int(args[0])
-            rating = parse_rating(args[1]) if len(args) > 1 and is_valid_rating(args[1]) else 0.0
+            rating = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
             playtomic_id = args[2] if len(args) > 2 else None
             
             # Проверяем, существует ли пользователь
