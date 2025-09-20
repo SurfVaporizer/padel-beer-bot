@@ -158,17 +158,18 @@ class RatingBot:
 /setptid - Установить PlayTomic ID
 /getptid - Узнать PlayTomic ID
 /profile - Полный профиль пользователя
+/createuser - Создать пользователя (только админы)
 /help - Показать эту справку
 
 📝 Форматы команд для админов:
-• /setrating @username 25 - по @username
-• /setrating 123456789 25 - по telegram_id
+• /setrating @username 25 - по @username (если пользователь есть в БД)
+• /setrating 123456789 25 - по telegram_id (создает если нет)
 • /setrating 25 (в ответ) - в ответ на сообщение
 • /setrating 25 - себе
 
+• /createuser 123456789 25 john_player - создать нового пользователя
 • /getrating @username - рейтинг по @username
 • /getrating 123456789 - рейтинг по telegram_id
-• /getrating (в ответ) - в ответ на сообщение
             """
         else:
             help_text = """
@@ -236,7 +237,12 @@ class RatingBot:
                 return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = get_user_id_by_username(args[0])
             if target_user_id is None:
-                return await update.message.reply_text(f"❌ Пользователь {args[0]} не найден в базе данных. Пользователь должен сначала использовать бота.")
+                return await update.message.reply_text(
+                    f"❌ Пользователь {args[0]} не найден в базе данных.\n\n"
+                    f"💡 Для создания нового пользователя используйте:\n"
+                    f"/setrating <telegram_id> <rating>\n\n"
+                    f"Пример: /setrating 123456789 {args[1]}"
+                )
             target_display_name = args[0]
             rating_val = int(args[1])
 
@@ -247,6 +253,9 @@ class RatingBot:
             target_user_id = int(args[0])
             target_display_name = f"user_id={target_user_id}"
             rating_val = int(args[1])
+            
+            # Создаем пользователя если его нет (только для админов)
+            ensure_user_exists(target_user_id, None, None)
 
         # Вариант 4: /setrating <rating> — себе (доступно всем)
         elif len(args) == 1 and args[0].isdigit():
@@ -405,3 +414,114 @@ class RatingBot:
             profile_text += f"🎾 PlayTomic ID: не установлен"
         
         await update.message.reply_text(profile_text)
+
+    @staticmethod
+    async def create_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /createuser - создать пользователя (только для админов)"""
+        if not await is_admin(update, context):
+            return await update.message.reply_text("❌ Команда доступна только администраторам чата.")
+
+        args = context.args
+        if len(args) < 1:
+            return await update.message.reply_text(
+                "Использование:\n"
+                "• /createuser <telegram_id> [rating] [playtomic_id]\n"
+                "• /createuser 123456789 25 john_player\n"
+                "• /createuser 987654321 15\n"
+                "• /createuser 555666777"
+            )
+
+        try:
+            telegram_id = int(args[0])
+            rating = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
+            playtomic_id = args[2] if len(args) > 2 else None
+            
+            # Проверяем, существует ли пользователь
+            existing_rating = get_rating(telegram_id)
+            if existing_rating is not None and telegram_id in [r[0] for r in get_all_users()]:
+                return await update.message.reply_text(f"❌ Пользователь с ID {telegram_id} уже существует в базе данных.")
+            
+            # Создаем пользователя
+            ensure_user_exists(telegram_id, None, None)
+            
+            # Устанавливаем рейтинг если указан
+            if rating > 0:
+                set_rating(telegram_id, rating)
+            
+            # Устанавливаем PlayTomic ID если указан
+            if playtomic_id:
+                set_pt_userid(telegram_id, playtomic_id)
+            
+            # Формируем ответ
+            response = f"✅ Пользователь {telegram_id} создан!\n"
+            response += f"🏆 Рейтинг: {get_rating(telegram_id)}\n"
+            pt_id = get_pt_userid(telegram_id)
+            if pt_id:
+                response += f"🎾 PlayTomic ID: {pt_id}"
+            
+            await update.message.reply_text(response)
+            
+        except ValueError:
+            await update.message.reply_text("❌ Некорректный telegram_id. Используйте числовой ID.")
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            await update.message.reply_text("❌ Ошибка при создании пользователя.")
+
+def get_all_users():
+    """Получить всех пользователей из базы данных"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("SELECT telegram_id, telegram_username, first_name, rating FROM user_ratings")
+        return cursor.fetchall()
+    finally:
+        conn.close()
+
+    @staticmethod
+    async def get_user_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /getuserid - получить telegram_id пользователя (только для админов)"""
+        if not await is_admin(update, context):
+            return await update.message.reply_text("❌ Команда доступна только администраторам чата.")
+
+        args = context.args
+        
+        # Если это ответ на сообщение
+        if update.message and update.message.reply_to_message:
+            target_user = update.message.reply_to_message.from_user
+            response = f"👤 Информация о пользователе:\n"
+            response += f"🆔 Telegram ID: {target_user.id}\n"
+            response += f"👤 Имя: {target_user.first_name or 'Не указано'}\n"
+            response += f"📝 Username: @{target_user.username or 'нет'}\n"
+            
+            # Проверяем, есть ли в базе
+            rating = get_rating(target_user.id)
+            pt_id = get_pt_userid(target_user.id)
+            response += f"🏆 Рейтинг в БД: {rating}\n"
+            if pt_id:
+                response += f"🎾 PlayTomic ID: {pt_id}"
+                
+            await update.message.reply_text(response)
+            
+        # Если указан @username
+        elif args and len(args) == 1 and args[0].startswith('@'):
+            username = args[0]
+            telegram_id = get_user_id_by_username(username)
+            
+            if telegram_id is None:
+                await update.message.reply_text(f"❌ Пользователь {username} не найден в базе данных.")
+            else:
+                rating = get_rating(telegram_id)
+                pt_id = get_pt_userid(telegram_id)
+                
+                response = f"👤 Информация о {username}:\n"
+                response += f"🆔 Telegram ID: {telegram_id}\n"
+                response += f"🏆 Рейтинг: {rating}\n"
+                if pt_id:
+                    response += f"🎾 PlayTomic ID: {pt_id}"
+                    
+                await update.message.reply_text(response)
+        else:
+            await update.message.reply_text(
+                "Использование:\n"
+                "• В ответ на сообщение: /getuserid\n"
+                "• По @username: /getuserid @john_doe"
+            )
