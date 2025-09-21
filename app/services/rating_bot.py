@@ -81,6 +81,8 @@ def get_playtomic_rating_message(rating: float) -> str:
     """Получить сообщение о рейтинге по шкале Playtomic"""
     if rating > 6.0:
         return "🤯 Что-то на Тапию ты не похож и даже не Чингото! Рейтинг по шкале Playtomic от 0.5 до 6.0"
+    elif rating < 0.5:
+        return "❌ Рейтинг слишком низкий! Минимальный рейтинг по шкале Playtomic: 0.5"
     elif rating >= 5.5:
         return "🏆 ПРО уровень! Очень сильный игрок!"
     elif rating >= 4.5:
@@ -536,7 +538,6 @@ class RatingBot:
                     "Использование:\n"
                     "• В ответ на сообщение: /setrating 2.5\n"
                     "• По @username: /setrating @john_doe 2,3\n"
-                    "• По user_id: /setrating 123456789 1.75\n"
                     "• Себе: /setrating 2.0\n\n"
                     "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7\n"
                     "📊 Шкала Playtomic: от 0.5 до 6.0 (6.0 = ПРО уровень)" + debug_info
@@ -552,7 +553,7 @@ class RatingBot:
         # Проверяем валидность рейтинга по шкале Playtomic
         if not is_valid_playtomic_rating(rating_val):
             playtomic_message = get_playtomic_rating_message(rating_val)
-            return await safe_reply(update, f"❌ {playtomic_message}")
+            return await safe_reply(update, f"❌ {playtomic_message}\n\n💡 Пожалуйста, введите корректное значение от 0.5 до 6.0")
         
         set_rating(target_user_id, rating_val, target_username, target_first_name)
         
