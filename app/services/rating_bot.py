@@ -160,9 +160,9 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
         logger.error(f"Critical error searching for user {username}: {e}")
         return None, None, None
 
-def set_rating(user_id: int, rating: float):
+def set_rating(user_id: int, rating: float, username: str = None, first_name: str = None):
     """Установить рейтинг пользователя в базе данных"""
-    ensure_user_exists(user_id)
+    ensure_user_exists(user_id, username, first_name)
     conn = get_db_connection()
     try:
         conn.execute(
@@ -364,17 +364,20 @@ class RatingBot:
         target_user_id = None
         rating_val = None
         target_display_name = None
+        target_username = None
+        target_first_name = None
 
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
         if update.message and update.message.reply_to_message and len(args) == 1 and is_valid_rating(args[0]):
             if not is_user_admin:
                 return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
-            target_display_name = update.message.reply_to_message.from_user.first_name
+            target_username = update.message.reply_to_message.from_user.username
+            target_first_name = update.message.reply_to_message.from_user.first_name
+            target_display_name = target_first_name
             rating_val = parse_rating(args[0])
             # Сохраняем информацию о целевом пользователе
-            ensure_user_exists(target_user_id, update.message.reply_to_message.from_user.username, 
-                             update.message.reply_to_message.from_user.first_name)
+            ensure_user_exists(target_user_id, target_username, target_first_name)
 
         # Вариант 2: /setrating @username <rating> (только для админов)
         elif len(args) == 2 and args[0].startswith('@') and is_valid_rating(args[1]):
@@ -383,6 +386,10 @@ class RatingBot:
             
             # Сначала ищем в базе данных
             target_user_id = get_user_id_by_username(args[0])
+            if target_user_id is not None:
+                # Пользователь найден в БД, получаем его данные
+                target_username = args[0].lstrip('@')
+                # Можно получить first_name из БД, но пока оставим None
             
             # Если не найден в БД, ищем в чате
             if target_user_id is None:
@@ -392,6 +399,8 @@ class RatingBot:
                     # Найден в чате! Создаем в БД
                     ensure_user_exists(chat_user_id, chat_username, chat_first_name)
                     target_user_id = chat_user_id
+                    target_username = chat_username
+                    target_first_name = chat_first_name
                     await safe_reply(update, f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
                 else:
                     # Не найден ни в БД, ни в чате - предлагаем альтернативы
@@ -414,6 +423,8 @@ class RatingBot:
             if not is_user_admin:
                 return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
+            target_username = None  # Неизвестен при установке по ID
+            target_first_name = None  # Неизвестен при установке по ID
             target_display_name = f"user_id={target_user_id}"
             rating_val = parse_rating(args[1])
             
@@ -423,6 +434,8 @@ class RatingBot:
         # Вариант 4: /setrating <rating> — себе (доступно всем)
         elif len(args) == 1 and is_valid_rating(args[0]):
             target_user_id = current_user_id
+            target_username = current_username
+            target_first_name = current_first_name
             target_display_name = "вам"
             rating_val = parse_rating(args[0])
 
@@ -443,7 +456,7 @@ class RatingBot:
                     "💡 Только администраторы могут устанавливать рейтинг другим пользователям."
                 )
 
-        set_rating(target_user_id, rating_val)
+        set_rating(target_user_id, rating_val, target_username, target_first_name)
         await safe_reply(update, f"✅ Рейтинг {target_display_name} установлен: {rating_val}")
 
     @staticmethod
