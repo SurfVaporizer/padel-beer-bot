@@ -297,8 +297,7 @@ class RatingBot:
 🎾 Команды бота (Администратор):
 
 /start - Начать работу с ботом
-/getrating - Узнать рейтинг
-/getuserrating - Узнать рейтинг пользователя
+/getrating [аргумент] - Узнать рейтинг (свой или указанного пользователя)
 /setrating - Установить рейтинг
 /setptid - Установить PlayTomic ID
 /getptid - Узнать PlayTomic ID
@@ -321,8 +320,7 @@ class RatingBot:
 🎾 Команды бота:
 
 /start - Начать работу с ботом
-/getrating - Узнать свой рейтинг
-/getuserrating - Узнать рейтинг пользователя
+/getrating [аргумент] - Узнать рейтинг (свой или указанного пользователя)
 /setrating - Установить свой рейтинг
 /setptid - Установить свой PlayTomic ID
 /getptid - Узнать PlayTomic ID
@@ -342,11 +340,58 @@ class RatingBot:
 
     @staticmethod
     async def get_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /getrating - получить рейтинг"""
-        user_id = update.effective_user.id
-        rating = get_rating(user_id)
+        """Команда /getrating - получить рейтинг (свой или указанного пользователя)"""
+        args = context.args
+        target_user_id = None
+        target_username = None
         
-        await safe_reply(update, f"🏆 Ваш текущий рейтинг: {rating}")
+        # Если это ответ на сообщение
+        if update.message and update.message.reply_to_message:
+            target_user_id = update.message.reply_to_message.from_user.id
+            target_username = update.message.reply_to_message.from_user.first_name or "пользователь"
+            
+        # Если указан @username
+        elif args and len(args) == 1 and args[0].startswith('@'):
+            target_user_id = get_user_id_by_username(args[0])
+            
+            # Если не найден в БД, ищем в чате
+            if target_user_id is None:
+                chat_user_id, chat_username, chat_first_name = await get_user_from_chat(update, context, args[0])
+                
+                if chat_user_id is not None:
+                    # Найден в чате! Создаем в БД
+                    ensure_user_exists(chat_user_id, chat_username, chat_first_name)
+                    target_user_id = chat_user_id
+                    await safe_reply(update, f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
+                else:
+                    chat_info = f"чат: {update.effective_chat.title or update.effective_chat.id}" if update.effective_chat else "неизвестный чат"
+                    return await safe_reply(update, 
+                        f"❌ Пользователь {args[0]} не найден ни в базе данных, ни в чате.\n\n"
+                        f"🔍 Поиск выполнен в: {chat_info}\n\n"
+                        f"💡 Решения:\n"
+                        f"1️⃣ Попросите {args[0]} написать боту /start\n"
+                        f"2️⃣ Ответьте на сообщение {args[0]}: /getrating\n"
+                        f"3️⃣ Используйте telegram_id: /getrating <ID>\n"
+                        f"4️⃣ Проверьте: /debugchat"
+                    )
+            
+            target_username = args[0]
+            
+        # Если указан user_id в аргументах
+        elif args and len(args) == 1 and args[0].isdigit():
+            target_user_id = int(args[0])
+            target_username = f"user_id={target_user_id}"
+            
+        # По умолчанию показываем рейтинг самого пользователя
+        else:
+            target_user_id = update.effective_user.id
+            target_username = "Ваш"
+
+        rating = get_rating(target_user_id)
+        pt_userid = get_pt_userid(target_user_id)
+        pt_info = f" (PlayTomic: {pt_userid})" if pt_userid else ""
+        
+        await safe_reply(update, f"🏆 {target_username} рейтинг: {rating}{pt_info}")
 
     @staticmethod
     async def set_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
