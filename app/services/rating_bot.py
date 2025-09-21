@@ -391,7 +391,21 @@ class RatingBot:
         pt_userid = get_pt_userid(target_user_id)
         pt_info = f" (PlayTomic: {pt_userid})" if pt_userid else ""
         
-        await safe_reply(update, f"🏆 {target_username} рейтинг: {rating}{pt_info}")
+        # Если рейтинг равен 0, предлагаем установить его
+        if rating == 0.0:
+            if target_user_id == update.effective_user.id:
+                # Свой рейтинг
+                message = f"🏆 Ваш рейтинг: {rating}{pt_info}\n\n"
+                message += "💡 Ваш рейтинг не установлен! Используйте команду /setrating чтобы установить свой рейтинг из PlayTomic.\n"
+                message += "Пример: /setrating 3.5"
+            else:
+                # Чужой рейтинг
+                message = f"🏆 {target_username} рейтинг: {rating}{pt_info}\n\n"
+                message += f"💡 У пользователя {target_username} рейтинг не установлен."
+        else:
+            message = f"🏆 {target_username} рейтинг: {rating}{pt_info}"
+        
+        await safe_reply(update, message)
 
     @staticmethod
     async def set_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
