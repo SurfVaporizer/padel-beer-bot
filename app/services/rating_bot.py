@@ -574,62 +574,68 @@ class RatingBot:
 
     @staticmethod
     async def debug_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /debugchat - отладочная информация о чате (только для админов)"""
-        if not await is_admin(update, context):
-            return await update.message.reply_text("❌ Команда доступна только администраторам чата.")
-
-        chat = update.effective_chat
-        if not chat:
-            return await update.message.reply_text("❌ Не удалось получить информацию о чате.")
-
+        """Команда /debugchat - отладочная информация о чате"""
         try:
-            response = f"🔍 Информация о чате:\n"
-            response += f"📝 Название: {getattr(chat, 'title', 'Без названия')}\n"
-            response += f"🆔 Chat ID: {chat.id}\n"
-            response += f"📱 Тип: {chat.type}\n"
+            await update.message.reply_text("🔍 Получаю информацию о чате...")
             
-            # Получаем количество участников (если возможно)
-            try:
-                member_count = await context.bot.get_chat_member_count(chat.id)
-                response += f"👥 Участников: {member_count}\n"
-            except Exception as count_error:
-                response += f"👥 Участников: ошибка ({count_error})\n"
+            chat = update.effective_chat
+            user = update.effective_user
             
-            # Проверяем права бота
-            try:
-                bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
-                response += f"🤖 Статус бота: {bot_member.status}\n"
+            response = f"🔍 Отладочная информация:\n\n"
+            response += f"👤 Ваши данные:\n"
+            response += f"   ID: {user.id}\n"
+            response += f"   Имя: {user.first_name}\n"
+            response += f"   Username: @{user.username or 'нет'}\n\n"
+            
+            if chat:
+                response += f"💬 Информация о чате:\n"
+                response += f"   Chat ID: {chat.id}\n"
+                response += f"   Тип: {chat.type}\n"
+                response += f"   Название: {getattr(chat, 'title', 'Без названия')}\n\n"
                 
-                # Проверяем права бота
-                if hasattr(bot_member, 'can_restrict_members'):
-                    response += f"🔧 Права бота: может ограничивать участников: {bot_member.can_restrict_members}\n"
-                    
-            except Exception as bot_error:
-                response += f"🤖 Статус бота: ошибка ({bot_error})\n"
-
-            # Пробуем получить список администраторов для диагностики
-            try:
-                admins = await context.bot.get_chat_administrators(chat.id)
-                response += f"👑 Администраторов: {len(admins)}\n"
+                # Простая проверка прав бота
+                try:
+                    bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
+                    response += f"🤖 Бот в чате: {bot_member.status}\n"
+                except Exception as bot_error:
+                    response += f"🤖 Бот в чате: ошибка - {bot_error}\n"
                 
-                # Показываем первых 3 админов для примера
-                admin_examples = []
-                for admin in admins[:3]:
-                    if admin.user and not admin.user.is_bot:
-                        username_display = f"@{admin.user.username}" if admin.user.username else "нет @username"
-                        admin_examples.append(f"{admin.user.first_name} ({username_display})")
-                
-                if admin_examples:
-                    response += f"👑 Примеры админов: {', '.join(admin_examples)}\n"
-                    
-            except Exception as admin_list_error:
-                response += f"👑 Администраторы: ошибка ({admin_list_error})\n"
+                # Попробуем получить количество участников
+                try:
+                    member_count = await context.bot.get_chat_member_count(chat.id)
+                    response += f"👥 Участников: {member_count}\n"
+                except Exception as count_error:
+                    response += f"👥 Участников: ошибка - {count_error}\n"
+            else:
+                response += f"💬 Чат: не определен\n"
 
             await update.message.reply_text(response)
             
         except Exception as e:
-            logger.error(f"Error getting chat info: {e}")
-            await update.message.reply_text(f"❌ Ошибка получения информации о чате: {e}")
+            logger.error(f"Error in debug_chat_command: {e}")
+            await update.message.reply_text(f"❌ Критическая ошибка: {e}")
+
+    @staticmethod
+    async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /test - простой тест работы бота"""
+        try:
+            user = update.effective_user
+            chat = update.effective_chat
+            
+            response = f"🧪 Тест бота:\n"
+            response += f"👤 Ваш ID: {user.id}\n"
+            response += f"👤 Ваше имя: {user.first_name}\n"
+            response += f"👤 Username: @{user.username or 'нет'}\n"
+            response += f"💬 Тип чата: {chat.type}\n"
+            response += f"💬 Chat ID: {chat.id}\n"
+            if chat.title:
+                response += f"💬 Название: {chat.title}\n"
+            
+            await update.message.reply_text(response)
+            
+        except Exception as e:
+            logger.error(f"Error in test command: {e}")
+            await update.message.reply_text(f"❌ Ошибка в тесте: {e}")
 
 def get_all_users():
     """Получить всех пользователей из базы данных"""

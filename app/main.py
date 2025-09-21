@@ -32,6 +32,7 @@ telegram_app.add_handler(CommandHandler("profile", RatingBot.get_profile_command
 telegram_app.add_handler(CommandHandler("createuser", RatingBot.create_user_command))
 telegram_app.add_handler(CommandHandler("getuserid", RatingBot.get_user_id_command))
 telegram_app.add_handler(CommandHandler("debugchat", RatingBot.debug_chat_command))
+telegram_app.add_handler(CommandHandler("test", RatingBot.test_command))
 
 @app.on_event("startup")
 async def startup_event():
