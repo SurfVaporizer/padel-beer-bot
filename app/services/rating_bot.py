@@ -92,9 +92,33 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
         clean_username = username.lstrip('@')
         logger.info(f"Searching for user '{clean_username}' in chat {chat.id} ({getattr(chat, 'title', 'No title')})")
         
-        # Метод 1: Поиск через администраторов и участников
+        # Метод 1: Получаем ID пользователя через get_chat("@username")
         try:
-            logger.info("Getting chat administrators...")
+            logger.info(f"Trying get_chat('@{clean_username}') to get user ID...")
+            user_chat = await context.bot.get_chat(f"@{clean_username}")
+            
+            if user_chat and user_chat.id:
+                user_id = user_chat.id
+                logger.info(f"SUCCESS: Got user ID {user_id} from get_chat('@{clean_username}')")
+                
+                # Теперь проверяем, что этот пользователь есть в нашем чате
+                try:
+                    member = await context.bot.get_chat_member(chat.id, user_id)
+                    if member and member.user and not member.user.is_bot:
+                        logger.info(f"SUCCESS: User @{clean_username} (ID={user_id}) confirmed in chat")
+                        return member.user.id, member.user.username, member.user.first_name
+                    else:
+                        logger.warning(f"User @{clean_username} (ID={user_id}) not found in chat or is a bot")
+                        
+                except Exception as member_check_error:
+                    logger.warning(f"Could not verify user @{clean_username} (ID={user_id}) in chat: {member_check_error}")
+                    
+        except Exception as get_chat_error:
+            logger.info(f"get_chat('@{clean_username}') failed: {get_chat_error}")
+        
+        # Метод 2 (запасной): Поиск через администраторов
+        try:
+            logger.info("Fallback: searching through chat administrators...")
             admins = await context.bot.get_chat_administrators(chat.id)
             logger.info(f"Found {len(admins)} administrators")
             
@@ -108,26 +132,7 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception as admin_error:
             logger.warning(f"Could not get administrators: {admin_error}")
         
-        # Метод 2: Прямой поиск через get_chat_member с разными вариантами
-        search_variants = [
-            clean_username,        # username
-            f"@{clean_username}",  # @username
-        ]
-        
-        for variant in search_variants:
-            try:
-                logger.info(f"Trying get_chat_member with: '{variant}'")
-                member = await context.bot.get_chat_member(chat.id, variant)
-                
-                if member and member.user and not member.user.is_bot:
-                    logger.info(f"SUCCESS: Found user via get_chat_member: {variant} → ID={member.user.id}")
-                    return member.user.id, member.user.username, member.user.first_name
-                    
-            except Exception as variant_error:
-                logger.info(f"get_chat_member('{variant}') failed: {variant_error}")
-                continue
-        
-        logger.warning(f"User '{username}' not found in chat {chat.id} with any method")
+        logger.warning(f"User '@{username}' not found in chat {chat.id} with any method")
         return None, None, None
         
     except Exception as e:
@@ -636,6 +641,34 @@ class RatingBot:
         except Exception as e:
             logger.error(f"Error in test command: {e}")
             await update.message.reply_text(f"❌ Ошибка в тесте: {e}")
+
+    @staticmethod
+    async def find_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /finduser @username - тест поиска пользователя"""
+        try:
+            args = context.args
+            if not args:
+                await update.message.reply_text("Использование: /finduser @username")
+                return
+            
+            username = args[0]
+            await update.message.reply_text(f"🔍 Ищу пользователя {username}...")
+            
+            user_id, found_username, first_name = await get_user_from_chat(update, context, username)
+            
+            if user_id:
+                response = f"✅ Пользователь найден!\n"
+                response += f"👤 ID: {user_id}\n"
+                response += f"👤 Username: @{found_username or 'нет'}\n"
+                response += f"👤 Имя: {first_name or 'нет'}\n"
+            else:
+                response = f"❌ Пользователь {username} не найден в чате."
+            
+            await update.message.reply_text(response)
+            
+        except Exception as e:
+            logger.error(f"Error in find_user command: {e}")
+            await update.message.reply_text(f"❌ Ошибка поиска: {e}")
 
 def get_all_users():
     """Получить всех пользователей из базы данных"""
