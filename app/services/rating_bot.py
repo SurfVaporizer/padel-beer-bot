@@ -391,6 +391,9 @@ class RatingBot:
         pt_userid = get_pt_userid(target_user_id)
         pt_info = f" (PlayTomic: {pt_userid})" if pt_userid else ""
         
+        # Отладочная информация
+        debug_info = f"\n🔍 Отладка: target_user_id={target_user_id}, args={args}, current_user={update.effective_user.id}"
+        
         # Если рейтинг равен 0, предлагаем установить его
         if rating == 0.0:
             if target_user_id == update.effective_user.id:
@@ -404,6 +407,9 @@ class RatingBot:
                 message += f"💡 У пользователя {target_username} рейтинг не установлен."
         else:
             message = f"🏆 {target_username} рейтинг: {rating}{pt_info}"
+        
+        # Добавляем отладочную информацию для тестирования
+        message += debug_info
         
         await safe_reply(update, message)
 
@@ -500,13 +506,14 @@ class RatingBot:
 
         if target_user_id is None or rating_val is None:
             if is_user_admin:
+                debug_info = f"\n🔍 Отладка: target_user_id={target_user_id}, rating_val={rating_val}, args={args}"
                 return await safe_reply(update, 
                     "Использование:\n"
                     "• В ответ на сообщение: /setrating 2.5\n"
                     "• По @username: /setrating @john_doe 2,3\n"
                     "• По user_id: /setrating 123456789 1.75\n"
                     "• Себе: /setrating 2.0\n\n"
-                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7"
+                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7" + debug_info
                 )
             else:
                 return await safe_reply(update, 
