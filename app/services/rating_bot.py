@@ -89,17 +89,26 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logger.debug(f"Not a group chat, cannot search for {username}")
             return None, None, None
         
+        # Очищаем username от всех символов @ в начале
         clean_username = username.lstrip('@')
+        
+        # Проверяем, что после очистки что-то осталось
+        if not clean_username:
+            logger.warning(f"Empty username after cleaning: '{username}'")
+            return None, None, None
+            
         logger.info(f"Searching for user '{clean_username}' in chat {chat.id} ({getattr(chat, 'title', 'No title')})")
+        logger.info(f"Original input: '{username}' → cleaned: '{clean_username}'")
         
         # Метод 1: Получаем ID пользователя через get_chat("@username")
         try:
-            logger.info(f"Trying get_chat('@{clean_username}') to get user ID...")
-            user_chat = await context.bot.get_chat(f"@{clean_username}")
+            search_username = f"@{clean_username}"
+            logger.info(f"Trying get_chat('{search_username}') to get user ID...")
+            user_chat = await context.bot.get_chat(search_username)
             
             if user_chat and user_chat.id:
                 user_id = user_chat.id
-                logger.info(f"SUCCESS: Got user ID {user_id} from get_chat('@{clean_username}')")
+                logger.info(f"SUCCESS: Got user ID {user_id} from get_chat('{search_username}')")
                 
                 # Теперь проверяем, что этот пользователь есть в нашем чате
                 try:
@@ -114,7 +123,7 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     logger.warning(f"Could not verify user @{clean_username} (ID={user_id}) in chat: {member_check_error}")
                     
         except Exception as get_chat_error:
-            logger.info(f"get_chat('@{clean_username}') failed: {get_chat_error}")
+            logger.info(f"get_chat('{search_username}') failed: {get_chat_error}")
         
         # Метод 2 (запасной): Поиск через администраторов
         try:
@@ -652,19 +661,26 @@ class RatingBot:
                 return
             
             username = args[0]
-            await update.message.reply_text(f"🔍 Ищу пользователя {username}...")
+            clean_username = username.lstrip('@')
+            
+            response = f"🔍 Тест очистки username:\n"
+            response += f"Ввод: '{username}'\n"
+            response += f"Очищено: '{clean_username}'\n"
+            response += f"Будет искать: '@{clean_username}'\n\n"
+            
+            await update.message.reply_text(response + "Начинаю поиск...")
             
             user_id, found_username, first_name = await get_user_from_chat(update, context, username)
             
             if user_id:
-                response = f"✅ Пользователь найден!\n"
-                response += f"👤 ID: {user_id}\n"
-                response += f"👤 Username: @{found_username or 'нет'}\n"
-                response += f"👤 Имя: {first_name or 'нет'}\n"
+                result = f"✅ Пользователь найден!\n"
+                result += f"👤 ID: {user_id}\n"
+                result += f"👤 Username: @{found_username or 'нет'}\n"
+                result += f"👤 Имя: {first_name or 'нет'}\n"
             else:
-                response = f"❌ Пользователь {username} не найден в чате."
+                result = f"❌ Пользователь {username} не найден в чате."
             
-            await update.message.reply_text(response)
+            await update.message.reply_text(result)
             
         except Exception as e:
             logger.error(f"Error in find_user command: {e}")
