@@ -180,3 +180,31 @@ cython_debug/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Node artifact files
+node_modules/
+
+# Compiled Java class files
+*.class
+
+# Package files
+*.jar
+
+# Maven
+target/
+
+# Unit test reports
+TEST*.xml
+
+# Applications
+*.app
+*.exe
+*.war
+
+# Large media files
+*.mp4
+*.tiff
+*.avi
+*.flv
+*.mov
+*.wmv
