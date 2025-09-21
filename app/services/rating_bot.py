@@ -171,6 +171,16 @@ def get_rating(user_id: int) -> float:
     finally:
         conn.close()
 
+def user_exists_in_db(user_id: int) -> bool:
+    """Проверить, существует ли пользователь в базе данных"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("SELECT 1 FROM user_ratings WHERE telegram_id = ?", (user_id,))
+        result = cursor.fetchone()
+        return result is not None
+    finally:
+        conn.close()
+
 def set_pt_userid(user_id: int, pt_userid: str):
     """Установить PlayTomic ID пользователя в базе данных"""
     ensure_user_exists(user_id)
@@ -210,19 +220,59 @@ class RatingBot:
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /start"""
         user = update.effective_user
-        welcome_text = f"""
+        
+        # Автоматически добавляем пользователя в БД при первом запуске
+        try:
+            # Проверяем, есть ли пользователь в БД
+            if not user_exists_in_db(user.id):
+                # Пользователя нет в БД - добавляем его
+                ensure_user_exists(user.id, user.username, user.first_name)
+                logger.info(f"New user added to DB: {user.id} (@{user.username or 'no_username'}) - {user.first_name}")
+                
+                welcome_text = f"""
 🎾 Добро пожаловать в Rating Bot, {user.first_name}!
+
+✅ Вы успешно зарегистрированы в системе!
+📊 Ваш начальный рейтинг: 0.0
 
 Этот бот управляет рейтингами игроков и PlayTomic ID.
 
 Доступные команды:
 /getrating - Узнать рейтинг
-/setrating - Установить рейтинг
+/setrating - Установить рейтинг  
 /setptid - Установить PlayTomic ID
 /getptid - Узнать PlayTomic ID
 /profile - Полный профиль
 /help - Помощь
-        """
+                """
+            else:
+                # Пользователь уже есть в БД
+                current_rating = get_rating(user.id)
+                welcome_text = f"""
+🎾 С возвращением, {user.first_name}!
+
+📊 Ваш текущий рейтинг: {current_rating}
+
+Доступные команды:
+/getrating - Узнать рейтинг
+/setrating - Установить рейтинг
+/setptid - Установить PlayTomic ID  
+/getptid - Узнать PlayTomic ID
+/profile - Полный профиль
+/help - Помощь
+                """
+                
+        except Exception as e:
+            logger.error(f"Error in start command: {e}")
+            welcome_text = f"""
+🎾 Добро пожаловать в Rating Bot, {user.first_name}!
+
+⚠️ Произошла ошибка при регистрации. Попробуйте позже.
+
+Доступные команды:
+/help - Помощь
+            """
+        
         await update.message.reply_text(welcome_text)
 
     @staticmethod
@@ -685,6 +735,38 @@ class RatingBot:
         except Exception as e:
             logger.error(f"Error in find_user command: {e}")
             await update.message.reply_text(f"❌ Ошибка поиска: {e}")
+
+    @staticmethod
+    async def check_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /checkdb - проверить наличие пользователя в БД"""
+        try:
+            user = update.effective_user
+            
+            # Проверяем, есть ли пользователь в БД
+            if user_exists_in_db(user.id):
+                current_rating = get_rating(user.id)
+                response = f"✅ Вы есть в базе данных!\n"
+                response += f"👤 ID: {user.id}\n"
+                response += f"👤 Имя: {user.first_name}\n"
+                response += f"👤 Username: @{user.username or 'нет'}\n"
+                response += f"📊 Рейтинг: {current_rating}\n"
+                
+                # Проверяем PlayTomic ID
+                pt_id = get_pt_userid(user.id)
+                if pt_id:
+                    response += f"🎾 PlayTomic ID: {pt_id}\n"
+                else:
+                    response += f"🎾 PlayTomic ID: не установлен\n"
+            else:
+                response = f"❌ Вас нет в базе данных.\n"
+                response += f"👤 Ваш ID: {user.id}\n"
+                response += f"💡 Используйте /start для регистрации.\n"
+            
+            await update.message.reply_text(response)
+            
+        except Exception as e:
+            logger.error(f"Error in check_db command: {e}")
+            await update.message.reply_text(f"❌ Ошибка проверки БД: {e}")
 
 def get_all_users():
     """Получить всех пользователей из базы данных"""
