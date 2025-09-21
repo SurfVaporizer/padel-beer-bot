@@ -73,9 +73,31 @@ def parse_rating(rating_str: str) -> float:
     except ValueError:
         return None
 
+def is_valid_playtomic_rating(rating: float) -> bool:
+    """Проверка, является ли рейтинг валидным по шкале Playtomic (0.5-6.0)"""
+    return 0.5 <= rating <= 6.0
+
+def get_playtomic_rating_message(rating: float) -> str:
+    """Получить сообщение о рейтинге по шкале Playtomic"""
+    if rating > 6.0:
+        return "🤯 Что-то на Тапию ты не похож и даже не Чингото! Рейтинг по шкале Playtomic от 0.5 до 6.0"
+    elif rating >= 5.5:
+        return "🏆 ПРО уровень! Очень сильный игрок!"
+    elif rating >= 4.5:
+        return "💪 Отличный игрок!"
+    elif rating >= 3.5:
+        return "👍 Хороший игрок!"
+    elif rating >= 2.5:
+        return "📈 Развивающийся игрок!"
+    elif rating >= 1.5:
+        return "🌱 Начинающий игрок!"
+    else:
+        return "🎯 Начинающий путь в паделе!"
+
 def is_valid_rating(rating_str: str) -> bool:
-    """Проверка, является ли строка валидным рейтингом"""
-    return parse_rating(rating_str) is not None
+    """Проверка, является ли строка валидным рейтингом по шкале Playtomic"""
+    rating = parse_rating(rating_str)
+    return rating is not None and is_valid_playtomic_rating(rating)
 
 def get_user_id_by_username(username: str) -> int:
     """Получить telegram_id по username"""
@@ -367,7 +389,7 @@ class RatingBot:
                     chat_info = f"чат: {update.effective_chat.title or update.effective_chat.id}" if update.effective_chat else "неизвестный чат"
                     return await safe_reply(update, 
                         f"❌ Пользователь {args[0]} не найден ни в базе данных, ни в чате.\n\n"
-                        f"🔍 Поиск выполнен в: {chat_info}\n\n"
+                       
                         f"💡 Решения:\n"
                         f"1️⃣ Попросите {args[0]} написать боту /start\n"
                         f"2️⃣ Ответьте на сообщение {args[0]}: /getrating\n"
@@ -400,13 +422,16 @@ class RatingBot:
                 # Свой рейтинг
                 message = f"🏆 Ваш рейтинг: {rating}{pt_info}\n\n"
                 message += "💡 Ваш рейтинг не установлен! Используйте команду /setrating чтобы установить свой рейтинг из PlayTomic.\n"
-                message += "Пример: /setrating 3.5"
+                message += "Пример: /setrating 3.5\n\n"
+                message += "📊 Шкала Playtomic: от 0.5 до 6.0 (6.0 = ПРО уровень)"
             else:
                 # Чужой рейтинг
                 message = f"🏆 {target_username} рейтинг: {rating}{pt_info}\n\n"
                 message += f"💡 У пользователя {target_username} рейтинг не установлен."
         else:
-            message = f"🏆 {target_username} рейтинг: {rating}{pt_info}"
+            # Получаем описание рейтинга по шкале Playtomic
+            playtomic_message = get_playtomic_rating_message(rating)
+            message = f"🏆 {target_username} рейтинг: {rating}{pt_info}\n\n{playtomic_message}"
         
         # Добавляем отладочную информацию для тестирования
         message += debug_info
@@ -513,17 +538,27 @@ class RatingBot:
                     "• По @username: /setrating @john_doe 2,3\n"
                     "• По user_id: /setrating 123456789 1.75\n"
                     "• Себе: /setrating 2.0\n\n"
-                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7" + debug_info
+                    "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7\n"
+                    "📊 Шкала Playtomic: от 0.5 до 6.0 (6.0 = ПРО уровень)" + debug_info
                 )
             else:
                 return await safe_reply(update, 
                     "Использование:\n"
-                    "• Себе: /setrating 12\n\n"
-                    "💡 Только администраторы могут устанавливать рейтинг другим пользователям."
+                    "• Себе: /setrating 2.5\n\n"
+                    "💡 Только администраторы могут устанавливать рейтинг другим пользователям.\n"
+                    "📊 Шкала Playtomic: от 0.5 до 6.0 (6.0 = ПРО уровень)"
                 )
 
+        # Проверяем валидность рейтинга по шкале Playtomic
+        if not is_valid_playtomic_rating(rating_val):
+            playtomic_message = get_playtomic_rating_message(rating_val)
+            return await safe_reply(update, f"❌ {playtomic_message}")
+        
         set_rating(target_user_id, rating_val, target_username, target_first_name)
-        await safe_reply(update, f"✅ Рейтинг {target_display_name} установлен: {rating_val}")
+        
+        # Получаем сообщение о рейтинге
+        playtomic_message = get_playtomic_rating_message(rating_val)
+        await safe_reply(update, f"✅ Рейтинг {target_display_name} установлен: {rating_val}\n\n{playtomic_message}")
 
     @staticmethod
     async def get_user_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
