@@ -89,18 +89,34 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
             logger.debug(f"Not a group chat, cannot search for {username}")
             return None, None, None
         
-        clean_username = username.lstrip('@').lower()
-        logger.info(f"Searching for user '{clean_username}' in chat {chat.id} ({chat.title})")
+        clean_username = username.lstrip('@')
+        logger.info(f"Searching for user '{clean_username}' in chat {chat.id} ({getattr(chat, 'title', 'No title')})")
         
-        # Метод 1: Прямой поиск через get_chat_member
+        # Метод 1: Поиск через администраторов и участников
+        try:
+            logger.info("Getting chat administrators...")
+            admins = await context.bot.get_chat_administrators(chat.id)
+            logger.info(f"Found {len(admins)} administrators")
+            
+            for admin in admins:
+                if admin.user and admin.user.username:
+                    logger.debug(f"Checking admin: @{admin.user.username}")
+                    if admin.user.username.lower() == clean_username.lower():
+                        logger.info(f"SUCCESS: Found user among administrators: @{admin.user.username} → ID={admin.user.id}")
+                        return admin.user.id, admin.user.username, admin.user.first_name
+                        
+        except Exception as admin_error:
+            logger.warning(f"Could not get administrators: {admin_error}")
+        
+        # Метод 2: Прямой поиск через get_chat_member с разными вариантами
         search_variants = [
-            f"@{clean_username}",  # С @
-            clean_username,        # Без @
+            clean_username,        # username
+            f"@{clean_username}",  # @username
         ]
         
         for variant in search_variants:
             try:
-                logger.info(f"Trying get_chat_member with: {variant}")
+                logger.info(f"Trying get_chat_member with: '{variant}'")
                 member = await context.bot.get_chat_member(chat.id, variant)
                 
                 if member and member.user and not member.user.is_bot:
@@ -108,19 +124,8 @@ async def get_user_from_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     return member.user.id, member.user.username, member.user.first_name
                     
             except Exception as variant_error:
-                logger.debug(f"get_chat_member({variant}) failed: {variant_error}")
+                logger.info(f"get_chat_member('{variant}') failed: {variant_error}")
                 continue
-        
-        # Метод 2: Поиск через администраторов (если это может помочь)
-        try:
-            logger.info("Trying to search among chat administrators...")
-            admins = await context.bot.get_chat_administrators(chat.id)
-            for admin in admins:
-                if admin.user.username and admin.user.username.lower() == clean_username:
-                    logger.info(f"SUCCESS: Found user among administrators: {admin.user.username} → ID={admin.user.id}")
-                    return admin.user.id, admin.user.username, admin.user.first_name
-        except Exception as admin_error:
-            logger.debug(f"Admin search failed: {admin_error}")
         
         logger.warning(f"User '{username}' not found in chat {chat.id} with any method")
         return None, None, None
@@ -313,20 +318,17 @@ class RatingBot:
                     target_user_id = chat_user_id
                     await update.message.reply_text(f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
                 else:
-                    # Не найден ни в БД, ни в чате
+                    # Не найден ни в БД, ни в чате - предлагаем альтернативы
                     chat_info = f"чат: {update.effective_chat.title or update.effective_chat.id}" if update.effective_chat else "неизвестный чат"
                     return await update.message.reply_text(
                         f"❌ Пользователь {args[0]} не найден ни в базе данных, ни в чате.\n\n"
                         f"🔍 Поиск выполнен в: {chat_info}\n\n"
-                        f"💡 Возможные причины:\n"
-                        f"• Пользователь не является участником чата\n"
-                        f"• @username написан неправильно\n"
-                        f"• У пользователя нет публичного @username\n"
-                        f"• Пользователь заблокировал бота\n\n"
-                        f"🔧 Альтернативы:\n"
-                        f"• Попросите пользователя написать боту /start\n"
-                        f"• Используйте: /setrating <telegram_id> <rating>\n"
-                        f"• Ответьте на сообщение пользователя: /setrating {args[1]}"
+                        f"🔧 Решения:\n"
+                        f"1️⃣ Попросите {args[0]} написать боту /start\n"
+                        f"2️⃣ Ответьте на сообщение {args[0]}: /setrating {args[1]}\n"
+                        f"3️⃣ Используйте telegram_id: /setrating <ID> {args[1]}\n"
+                        f"4️⃣ Проверьте: /debugchat\n\n"
+                        f"💡 Если {args[0]} точно в чате, возможно у него нет публичного @username или есть ограничения приватности."
                     )
             
             target_display_name = args[0]
@@ -582,7 +584,7 @@ class RatingBot:
 
         try:
             response = f"🔍 Информация о чате:\n"
-            response += f"📝 Название: {chat.title or 'Без названия'}\n"
+            response += f"📝 Название: {getattr(chat, 'title', 'Без названия')}\n"
             response += f"🆔 Chat ID: {chat.id}\n"
             response += f"📱 Тип: {chat.type}\n"
             
@@ -590,15 +592,38 @@ class RatingBot:
             try:
                 member_count = await context.bot.get_chat_member_count(chat.id)
                 response += f"👥 Участников: {member_count}\n"
-            except:
-                response += f"👥 Участников: неизвестно\n"
+            except Exception as count_error:
+                response += f"👥 Участников: ошибка ({count_error})\n"
             
             # Проверяем права бота
             try:
                 bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
                 response += f"🤖 Статус бота: {bot_member.status}\n"
-            except:
-                response += f"🤖 Статус бота: неизвестно\n"
+                
+                # Проверяем права бота
+                if hasattr(bot_member, 'can_restrict_members'):
+                    response += f"🔧 Права бота: может ограничивать участников: {bot_member.can_restrict_members}\n"
+                    
+            except Exception as bot_error:
+                response += f"🤖 Статус бота: ошибка ({bot_error})\n"
+
+            # Пробуем получить список администраторов для диагностики
+            try:
+                admins = await context.bot.get_chat_administrators(chat.id)
+                response += f"👑 Администраторов: {len(admins)}\n"
+                
+                # Показываем первых 3 админов для примера
+                admin_examples = []
+                for admin in admins[:3]:
+                    if admin.user and not admin.user.is_bot:
+                        username_display = f"@{admin.user.username}" if admin.user.username else "нет @username"
+                        admin_examples.append(f"{admin.user.first_name} ({username_display})")
+                
+                if admin_examples:
+                    response += f"👑 Примеры админов: {', '.join(admin_examples)}\n"
+                    
+            except Exception as admin_list_error:
+                response += f"👑 Администраторы: ошибка ({admin_list_error})\n"
 
             await update.message.reply_text(response)
             
