@@ -460,7 +460,7 @@ class RatingBot:
         target_first_name = None
 
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
-        if update.message and update.message.reply_to_message and len(args) == 1 and is_valid_rating(args[0]):
+        if update.message and update.message.reply_to_message and len(args) == 1 and parse_rating(args[0]) is not None:
             if not is_user_admin:
                 return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
@@ -472,7 +472,7 @@ class RatingBot:
             ensure_user_exists(target_user_id, target_username, target_first_name)
 
         # Вариант 2: /setrating @username <rating> (только для админов)
-        elif len(args) == 2 and args[0].startswith('@') and is_valid_rating(args[1]):
+        elif len(args) == 2 and args[0].startswith('@') and parse_rating(args[1]) is not None:
             if not is_user_admin:
                 return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             
@@ -511,7 +511,7 @@ class RatingBot:
             rating_val = parse_rating(args[1])
 
         # Вариант 3: /setrating <user_id> <rating> (только для админов)
-        elif len(args) == 2 and args[0].isdigit() and is_valid_rating(args[1]):
+        elif len(args) == 2 and args[0].isdigit() and parse_rating(args[1]) is not None:
             if not is_user_admin:
                 return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
@@ -524,12 +524,14 @@ class RatingBot:
             ensure_user_exists(target_user_id, None, None)
 
         # Вариант 4: /setrating <rating> — себе (доступно всем)
-        elif len(args) == 1 and is_valid_rating(args[0]):
-            target_user_id = current_user_id
-            target_username = current_username
-            target_first_name = current_first_name
-            target_display_name = "вам"
-            rating_val = parse_rating(args[0])
+        elif len(args) == 1:
+            parsed_rating = parse_rating(args[0])
+            if parsed_rating is not None:
+                target_user_id = current_user_id
+                target_username = current_username
+                target_first_name = current_first_name
+                target_display_name = "вам"
+                rating_val = parsed_rating
 
         if target_user_id is None or rating_val is None:
             if is_user_admin:
