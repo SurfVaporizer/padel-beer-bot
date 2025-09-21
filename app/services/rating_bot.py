@@ -9,6 +9,18 @@ from app.models.database import get_db, UserRating
 
 logger = logging.getLogger(__name__)
 
+# --- helper: безопасная отправка сообщений ---
+async def safe_reply(update: Update, text: str):
+    """Безопасная отправка сообщения с проверкой на None"""
+    if update.message:
+        await update.message.reply_text(text)
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(text)
+    elif update.effective_chat:
+        await update.get_bot().send_message(chat_id=update.effective_chat.id, text=text)
+    else:
+        logger.error(f"Cannot send message - no valid chat context: {text}")
+
 # Функции для работы с базой данных SQLite
 import sqlite3
 import os
@@ -273,7 +285,7 @@ class RatingBot:
 /help - Помощь
             """
         
-        await update.message.reply_text(welcome_text)
+        await safe_reply(update, welcome_text)
 
     @staticmethod
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +338,7 @@ class RatingBot:
 • /setrating @username 25
             """
         
-        await update.message.reply_text(help_text)
+        await safe_reply(update, help_text)
 
     @staticmethod
     async def get_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -334,7 +346,7 @@ class RatingBot:
         user_id = update.effective_user.id
         rating = get_rating(user_id)
         
-        await update.message.reply_text(f"🏆 Ваш текущий рейтинг: {rating}")
+        await safe_reply(update, f"🏆 Ваш текущий рейтинг: {rating}")
 
     @staticmethod
     async def set_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,7 +368,7 @@ class RatingBot:
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
         if update.message and update.message.reply_to_message and len(args) == 1 and is_valid_rating(args[0]):
             if not is_user_admin:
-                return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
+                return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
             target_display_name = update.message.reply_to_message.from_user.first_name
             rating_val = parse_rating(args[0])
@@ -367,7 +379,7 @@ class RatingBot:
         # Вариант 2: /setrating @username <rating> (только для админов)
         elif len(args) == 2 and args[0].startswith('@') and is_valid_rating(args[1]):
             if not is_user_admin:
-                return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
+                return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             
             # Сначала ищем в базе данных
             target_user_id = get_user_id_by_username(args[0])
@@ -380,11 +392,11 @@ class RatingBot:
                     # Найден в чате! Создаем в БД
                     ensure_user_exists(chat_user_id, chat_username, chat_first_name)
                     target_user_id = chat_user_id
-                    await update.message.reply_text(f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
+                    await safe_reply(update, f"✅ Пользователь {args[0]} найден в чате и добавлен в базу данных!")
                 else:
                     # Не найден ни в БД, ни в чате - предлагаем альтернативы
                     chat_info = f"чат: {update.effective_chat.title or update.effective_chat.id}" if update.effective_chat else "неизвестный чат"
-                    return await update.message.reply_text(
+                    return await safe_reply(update, 
                         f"❌ Пользователь {args[0]} не найден ни в базе данных, ни в чате.\n\n"
                         f"🔍 Поиск выполнен в: {chat_info}\n\n"
                         f"🔧 Решения:\n"
@@ -392,8 +404,7 @@ class RatingBot:
                         f"2️⃣ Ответьте на сообщение {args[0]}: /setrating {args[1]}\n"
                         f"3️⃣ Используйте telegram_id: /setrating <ID> {args[1]}\n"
                         f"4️⃣ Проверьте: /debugchat\n\n"
-                        f"💡 Если {args[0]} точно в чате, возможно у него нет публичного @username или есть ограничения приватности."
-                    )
+                        f"💡 Если {args[0]} точно в чате, возможно у него нет публичного @username или есть ограничения приватности.")
             
             target_display_name = args[0]
             rating_val = parse_rating(args[1])
@@ -401,7 +412,7 @@ class RatingBot:
         # Вариант 3: /setrating <user_id> <rating> (только для админов)
         elif len(args) == 2 and args[0].isdigit() and is_valid_rating(args[1]):
             if not is_user_admin:
-                return await update.message.reply_text("❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
+                return await safe_reply(update, "❌ Устанавливать рейтинг другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
             target_display_name = f"user_id={target_user_id}"
             rating_val = parse_rating(args[1])
@@ -417,7 +428,7 @@ class RatingBot:
 
         if target_user_id is None or rating_val is None:
             if is_user_admin:
-                return await update.message.reply_text(
+                return await safe_reply(update, 
                     "Использование:\n"
                     "• В ответ на сообщение: /setrating 2.5\n"
                     "• По @username: /setrating @john_doe 2,3\n"
@@ -426,14 +437,14 @@ class RatingBot:
                     "💡 Поддерживаются дробные числа: 2.5, 1,3, 0.7"
                 )
             else:
-                return await update.message.reply_text(
+                return await safe_reply(update, 
                     "Использование:\n"
                     "• Себе: /setrating 12\n\n"
                     "💡 Только администраторы могут устанавливать рейтинг другим пользователям."
                 )
 
         set_rating(target_user_id, rating_val)
-        await update.message.reply_text(f"✅ Рейтинг {target_display_name} установлен: {rating_val}")
+        await safe_reply(update, f"✅ Рейтинг {target_display_name} установлен: {rating_val}")
 
     @staticmethod
     async def get_user_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -457,10 +468,10 @@ class RatingBot:
                     # Найден в чате! Создаем в БД
                     ensure_user_exists(chat_user_id, chat_username, chat_first_name)
                     target_user_id = chat_user_id
-                    await update.message.reply_text(f"✅ Пользователь {context.args[0]} найден в чате и добавлен в базу данных!")
+                    await safe_reply(update, f"✅ Пользователь {context.args[0]} найден в чате и добавлен в базу данных!")
                 else:
                     chat_info = f"чат: {update.effective_chat.title or update.effective_chat.id}" if update.effective_chat else "неизвестный чат"
-                    return await update.message.reply_text(
+                    return await safe_reply(update, 
                         f"❌ Пользователь {context.args[0]} не найден ни в базе данных, ни в чате.\n\n"
                         f"🔍 Поиск выполнен в: {chat_info}\n"
                         f"💡 Убедитесь, что пользователь является участником чата и имеет публичный @username."
@@ -479,7 +490,7 @@ class RatingBot:
         rating = get_rating(target_user_id)
         pt_userid = get_pt_userid(target_user_id)
         pt_info = f" (PlayTomic: {pt_userid})" if pt_userid else ""
-        await update.message.reply_text(f"🏆 {target_username} рейтинг: {rating}{pt_info}")
+        await safe_reply(update, f"🏆 {target_username} рейтинг: {rating}{pt_info}")
 
     @staticmethod
     async def set_pt_userid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -495,14 +506,14 @@ class RatingBot:
         # Вариант 1: ответ на сообщение -> user = replied (только для админов)
         if update.message and update.message.reply_to_message and len(args) == 1:
             if not is_user_admin:
-                return await update.message.reply_text("❌ Устанавливать PlayTomic ID другим пользователям могут только администраторы чата.")
+                return await safe_reply(update, "❌ Устанавливать PlayTomic ID другим пользователям могут только администраторы чата.")
             target_user_id = update.message.reply_to_message.from_user.id
             pt_userid = args[0]
 
         # Вариант 2: /setptid <user_id> <pt_userid> (только для админов)
         elif len(args) == 2 and args[0].isdigit():
             if not is_user_admin:
-                return await update.message.reply_text("❌ Устанавливать PlayTomic ID другим пользователям могут только администраторы чата.")
+                return await safe_reply(update, "❌ Устанавливать PlayTomic ID другим пользователям могут только администраторы чата.")
             target_user_id = int(args[0])
             pt_userid = args[1]
 
@@ -513,14 +524,14 @@ class RatingBot:
 
         if target_user_id is None or pt_userid is None:
             if is_user_admin:
-                return await update.message.reply_text(
+                return await safe_reply(update, 
                     "Использование:\n"
                     "• В ответ на сообщение: /setptid playtomic_username\n"
                     "• Явно по user_id: /setptid 123456789 playtomic_username\n"
                     "• Себе: /setptid playtomic_username"
                 )
             else:
-                return await update.message.reply_text(
+                return await safe_reply(update, 
                     "Использование:\n"
                     "• Себе: /setptid playtomic_username\n\n"
                     "💡 Только администраторы могут устанавливать PlayTomic ID другим пользователям."
@@ -528,7 +539,7 @@ class RatingBot:
 
         set_pt_userid(target_user_id, pt_userid)
         who = "вам" if target_user_id == current_user_id else f"user_id={target_user_id}"
-        await update.message.reply_text(f"✅ PlayTomic ID {who} установлен: {pt_userid}")
+        await safe_reply(update, f"✅ PlayTomic ID {who} установлен: {pt_userid}")
 
     @staticmethod
     async def get_pt_userid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -550,9 +561,9 @@ class RatingBot:
 
         pt_userid = get_pt_userid(target_user_id)
         if pt_userid:
-            await update.message.reply_text(f"🎾 {target_username} PlayTomic ID: {pt_userid}")
+            await safe_reply(update, f"🎾 {target_username} PlayTomic ID: {pt_userid}")
         else:
-            await update.message.reply_text(f"❌ {target_username} PlayTomic ID не установлен")
+            await safe_reply(update, f"❌ {target_username} PlayTomic ID не установлен")
 
     @staticmethod
     async def get_profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -582,17 +593,17 @@ class RatingBot:
         else:
             profile_text += f"🎾 PlayTomic ID: не установлен"
         
-        await update.message.reply_text(profile_text)
+        await safe_reply(update, profile_text)
 
     @staticmethod
     async def create_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /createuser - создать пользователя (только для админов)"""
         if not await is_admin(update, context):
-            return await update.message.reply_text("❌ Команда доступна только администраторам чата.")
+            return await safe_reply(update, "❌ Команда доступна только администраторам чата.")
 
         args = context.args
         if len(args) < 1:
-            return await update.message.reply_text(
+            return await safe_reply(update, 
                 "Использование:\n"
                 "• /createuser <telegram_id> [rating] [playtomic_id]\n"
                 "• /createuser 123456789 25 john_player\n"
@@ -608,7 +619,7 @@ class RatingBot:
             # Проверяем, существует ли пользователь
             existing_rating = get_rating(telegram_id)
             if existing_rating is not None and telegram_id in [r[0] for r in get_all_users()]:
-                return await update.message.reply_text(f"❌ Пользователь с ID {telegram_id} уже существует в базе данных.")
+                return await safe_reply(update, f"❌ Пользователь с ID {telegram_id} уже существует в базе данных.")
             
             # Создаем пользователя
             ensure_user_exists(telegram_id, None, None)
@@ -628,19 +639,19 @@ class RatingBot:
             if pt_id:
                 response += f"🎾 PlayTomic ID: {pt_id}"
             
-            await update.message.reply_text(response)
+            await safe_reply(update, response)
             
         except ValueError:
-            await update.message.reply_text("❌ Некорректный telegram_id. Используйте числовой ID.")
+            await safe_reply(update, "❌ Некорректный telegram_id. Используйте числовой ID.")
         except Exception as e:
             logger.error(f"Error creating user: {e}")
-            await update.message.reply_text("❌ Ошибка при создании пользователя.")
+            await safe_reply(update, "❌ Ошибка при создании пользователя.")
 
     @staticmethod
     async def debug_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /debugchat - отладочная информация о чате"""
         try:
-            await update.message.reply_text("🔍 Получаю информацию о чате...")
+            await safe_reply(update, "🔍 Получаю информацию о чате...")
             
             chat = update.effective_chat
             user = update.effective_user
@@ -673,11 +684,11 @@ class RatingBot:
             else:
                 response += f"💬 Чат: не определен\n"
 
-            await update.message.reply_text(response)
+            await safe_reply(update, response)
             
         except Exception as e:
             logger.error(f"Error in debug_chat_command: {e}")
-            await update.message.reply_text(f"❌ Критическая ошибка: {e}")
+            await safe_reply(update, f"❌ Критическая ошибка: {e}")
 
     @staticmethod
     async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -695,11 +706,11 @@ class RatingBot:
             if chat.title:
                 response += f"💬 Название: {chat.title}\n"
             
-            await update.message.reply_text(response)
+            await safe_reply(update, response)
             
         except Exception as e:
             logger.error(f"Error in test command: {e}")
-            await update.message.reply_text(f"❌ Ошибка в тесте: {e}")
+            await safe_reply(update, f"❌ Ошибка в тесте: {e}")
 
     @staticmethod
     async def find_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -707,7 +718,7 @@ class RatingBot:
         try:
             args = context.args
             if not args:
-                await update.message.reply_text("Использование: /finduser @username")
+                await safe_reply(update, "Использование: /finduser @username")
                 return
             
             username = args[0]
@@ -718,7 +729,7 @@ class RatingBot:
             response += f"Очищено: '{clean_username}'\n"
             response += f"Будет искать: '@{clean_username}'\n\n"
             
-            await update.message.reply_text(response + "Начинаю поиск...")
+            await safe_reply(update, response + "Начинаю поиск...")
             
             user_id, found_username, first_name = await get_user_from_chat(update, context, username)
             
@@ -730,11 +741,11 @@ class RatingBot:
             else:
                 result = f"❌ Пользователь {username} не найден в чате."
             
-            await update.message.reply_text(result)
+            await safe_reply(update, result)
             
         except Exception as e:
             logger.error(f"Error in find_user command: {e}")
-            await update.message.reply_text(f"❌ Ошибка поиска: {e}")
+            await safe_reply(update, f"❌ Ошибка поиска: {e}")
 
     @staticmethod
     async def check_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -762,11 +773,11 @@ class RatingBot:
                 response += f"👤 Ваш ID: {user.id}\n"
                 response += f"💡 Используйте /start для регистрации.\n"
             
-            await update.message.reply_text(response)
+            await safe_reply(update, response)
             
         except Exception as e:
             logger.error(f"Error in check_db command: {e}")
-            await update.message.reply_text(f"❌ Ошибка проверки БД: {e}")
+            await safe_reply(update, f"❌ Ошибка проверки БД: {e}")
 
 def get_all_users():
     """Получить всех пользователей из базы данных"""
@@ -781,7 +792,7 @@ def get_all_users():
     async def get_user_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /getuserid - получить telegram_id пользователя (только для админов)"""
         if not await is_admin(update, context):
-            return await update.message.reply_text("❌ Команда доступна только администраторам чата.")
+            return await safe_reply(update, "❌ Команда доступна только администраторам чата.")
 
         args = context.args
         
@@ -800,7 +811,7 @@ def get_all_users():
             if pt_id:
                 response += f"🎾 PlayTomic ID: {pt_id}"
                 
-            await update.message.reply_text(response)
+            await safe_reply(update, response)
             
         # Если указан @username
         elif args and len(args) == 1 and args[0].startswith('@'):
@@ -808,7 +819,7 @@ def get_all_users():
             telegram_id = get_user_id_by_username(username)
             
             if telegram_id is None:
-                await update.message.reply_text(f"❌ Пользователь {username} не найден в базе данных.")
+                await safe_reply(update, f"❌ Пользователь {username} не найден в базе данных.")
             else:
                 rating = get_rating(telegram_id)
                 pt_id = get_pt_userid(telegram_id)
@@ -819,9 +830,9 @@ def get_all_users():
                 if pt_id:
                     response += f"🎾 PlayTomic ID: {pt_id}"
                     
-                await update.message.reply_text(response)
+                await safe_reply(update, response)
         else:
-            await update.message.reply_text(
+            await safe_reply(update, 
                 "Использование:\n"
                 "• В ответ на сообщение: /getuserid\n"
                 "• По @username: /getuserid @john_doe"
